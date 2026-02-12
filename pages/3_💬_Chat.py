@@ -1,7 +1,11 @@
 import streamlit as st
 from utils.chat_service import process_query
+from utils.database import init_database
 
 st.set_page_config(page_title="Chat Assistant", page_icon="💬", layout="wide")
+
+# Initialize database
+init_database()
 
 st.title("💬 AI Chat Assistant")
 

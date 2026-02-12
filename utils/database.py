@@ -75,8 +75,32 @@ def init_database():
             ('Accounting Services', 'Finance'),
             ('HR & Recruitment', 'HR'),
             ('Training & Development', 'HR'),
+            # Grocery categories
+            ('Grocery Items', 'Operations'),
+            ('Meat & Poultry', 'Operations'),
+            ('Seafood', 'Operations'),
+            ('Dairy & Eggs', 'Operations'),
+            ('Fruits & Vegetables', 'Operations'),
+            ('Snacks & Beverages', 'Operations'),
+            ('Bakery', 'Operations'),
+            ('Frozen Foods', 'Operations'),
         ]
         cursor.executemany("INSERT OR IGNORE INTO categories (name, department) VALUES (?, ?)", categories)
+    
+    # Line items table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS line_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+            transaction_id INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
+            description TEXT NOT NULL,
+            quantity REAL DEFAULT 1.0,
+            unit_price REAL,
+            total REAL NOT NULL,
+            category TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     
     conn.commit()
     conn.close()
@@ -244,3 +268,119 @@ def execute_query(sql):
     
     conn.close()
     return results
+
+def save_line_items(document_id, transaction_id, line_items):
+    """Save line items to database with auto-categorization"""
+    if not line_items:
+        return
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    for item in line_items:
+        # Auto-categorize each item
+        category = auto_categorize_line_item(item.get('description', ''))
+        
+        cursor.execute("""
+            INSERT INTO line_items (
+                document_id, transaction_id, description, quantity, unit_price, total, category
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            document_id,
+            transaction_id,
+            item.get('description'),
+            item.get('quantity', 1.0),
+            item.get('unit_price', 0),
+            item.get('total', 0),
+            category
+        ))
+    
+    conn.commit()
+    conn.close()
+
+def get_line_items(document_id):
+    """Get all line items for a document"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM line_items 
+        WHERE document_id = ?
+        ORDER BY id
+    """, (document_id,))
+    
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return items
+
+def delete_document(document_id):
+    """Delete document and cascade to transactions and line_items"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # SQLite CASCADE should handle this, but let's be explicit
+    cursor.execute("DELETE FROM line_items WHERE document_id = ?", (document_id,))
+    cursor.execute("DELETE FROM transactions WHERE document_id = ?", (document_id,))
+    cursor.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    
+    conn.commit()
+    conn.close()
+
+def update_transaction(transaction_id, data):
+    """Update transaction fields"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Build UPDATE query dynamically based on provided data
+    fields = []
+    values = []
+    
+    for key in ['vendor_name', 'invoice_number', 'transaction_date', 'amount', 'tax_amount', 'category']:
+        if key in data:
+            fields.append(f"{key} = ?")
+            values.append(data[key])
+    
+    if fields:
+        values.append(transaction_id)
+        sql = f"UPDATE transactions SET {', '.join(fields)} WHERE id = ?"
+        cursor.execute(sql, values)
+        conn.commit()
+    
+    conn.close()
+
+def auto_categorize_line_item(description):
+    """Auto-categorize individual line items based on description"""
+    desc_lower = (description or '').lower()
+    
+    # Meat & Poultry
+    if any(kw in desc_lower for kw in ['chicken', 'beef', 'pork', 'sausage', 'meat', 'mutton', 'lamb']):
+        return 'Meat & Poultry'
+    
+    # Seafood
+    if any(kw in desc_lower for kw in ['fish', 'mackerel', 'tuna', 'salmon', 'seafood', 'prawn', 'crab', 'shrimp']):
+        return 'Seafood'
+    
+    # Dairy & Eggs
+    if any(kw in desc_lower for kw in ['egg', 'milk', 'cheese', 'yogurt', 'curd', 'dairy', 'butter', 'cream']):
+        return 'Dairy & Eggs'
+    
+    # Snacks & Beverages
+    if any(kw in desc_lower for kw in ['chips', 'snack', 'biscuit', 'cookie', 'beverage', 'drink', 'juice', 'soda']):
+        return 'Snacks & Beverages'
+    
+    # Fruits & Vegetables
+    if any(kw in desc_lower for kw in ['fruit', 'vegetable', 'apple', 'banana', 'carrot', 'beans', 'tomato', 'potato']):
+        return 'Fruits & Vegetables'
+    
+    # Bakery
+    if any(kw in desc_lower for kw in ['bread', 'cake', 'pastry', 'bakery', 'bun', 'roll']):
+        return 'Bakery'
+    
+    # Frozen Foods
+    if any(kw in desc_lower for kw in ['frozen', 'ice cream', 'popsicle']):
+        return 'Frozen Foods'
+    
+    # Default to Grocery Items
+    return 'Grocery Items'

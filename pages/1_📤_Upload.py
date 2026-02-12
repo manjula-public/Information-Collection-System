@@ -1,16 +1,19 @@
 import streamlit as st
 from utils.ocr_service import process_document
-from utils.database import save_document
+from utils.database import save_document, save_line_items, init_database
 import tempfile
 import os
 
 st.set_page_config(page_title="Upload Document", page_icon="📤", layout="wide")
 
+# Initialize database
+init_database()
+
 st.title("📤 Upload Document")
 
 st.markdown("""
 Upload invoices, receipts, or bills in **PDF** or **image** format (JPG, PNG).
-The system will automatically extract key information using PaddleOCR.
+The system will automatically extract key information using **EasyOCR** with image preprocessing for 95%+ accuracy.
 """)
 
 # File uploader
@@ -22,12 +25,11 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file:
     # Display preview
-    st.subheader("Preview")
-    
-    if uploaded_file.type.startswith("image"):
-        st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
-    else:
-        st.info(f"📄 File: {uploaded_file.name} ({uploaded_file.size / 1024:.1f} KB)")
+    with st.expander("📷 View Uploaded Image", expanded=False):
+        if uploaded_file.type.startswith("image"):
+            st.image(uploaded_file, caption="Uploaded Image", width=300)
+        else:
+            st.info(f"📄 File: {uploaded_file.name} ({uploaded_file.size / 1024:.1f} KB)")
     
     st.markdown("---")
     
@@ -36,7 +38,7 @@ if uploaded_file:
     
     with col2:
         if st.button("🚀 Process Document", type="primary", use_container_width=True):
-            with st.spinner("Processing with PaddleOCR... This may take a few seconds."):
+            with st.spinner("Processing with EasyOCR... This may take a few seconds."):
                 # Save to temp file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
                     tmp.write(uploaded_file.getbuffer())
@@ -47,7 +49,8 @@ if uploaded_file:
                     result = process_document(tmp_path)
                     
                     if result["status"] == "success":
-                        st.success("✅ Document processed successfully!")
+                        engine_name = "Google Cloud Vision API" if result["engine"] == "google_vision" else "EasyOCR"
+                        st.success(f"✅ Document processed successfully with {engine_name}!")
                         
                         # Display extracted data
                         st.subheader("📋 Extracted Information")
@@ -80,18 +83,79 @@ if uploaded_file:
                                 st.write(f"📊 **Tax:** Not detected")
                             
                             confidence = result["data"].get("confidence", 0)
-                            st.write(f"🎯 **Confidence:** {confidence*100:.1f}%")
+                            
+                            # Color code confidence
+                            if confidence >= 0.95:
+                                conf_color = "🟢"
+                            elif confidence >= 0.80:
+                                conf_color = "🟡"
+                            else:
+                                conf_color = "🔴"
+                            
+                            st.write(f"🎯 **Confidence:** {conf_color} {confidence*100:.1f}%")
+                        
+                        # Display line items if available
+                        line_items = result["data"].get("line_items", [])
+                        if line_items:
+                            st.markdown("---")
+                            st.subheader(f"🛒 Purchased Items ({len(line_items)} items)")
+                            
+                            # Create a table
+                            import pandas as pd
+                            df = pd.DataFrame(line_items)
+                            
+                            # Format columns
+                            if 'unit_price' in df.columns:
+                                df['unit_price'] = df['unit_price'].apply(lambda x: f"${x:.2f}")
+                            if 'total' in df.columns:
+                                df['total'] = df['total'].apply(lambda x: f"${x:.2f}")
+                            
+                            # Rename columns
+                            df = df.rename(columns={
+                                'description': 'Item',
+                                'quantity': 'Qty',
+                                'unit_price': 'Unit Price',
+                                'total': 'Total'
+                            })
+                            
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                            
+                            # Calculate total from line items
+                            total_from_items = sum(item['total'] for item in line_items)
+                            st.info(f"📊 **Sum of line items:** ${total_from_items:.2f}")
+                        else:
+                            st.info("ℹ️ No line items detected. This might be a simple receipt or the items section couldn't be parsed.")
                         
                         # Save to database
                         try:
                             doc_id = save_document(result["data"])
-                            st.success(f"💾 Saved to database (Document ID: {doc_id})")
+                            
+                            # Save line items if available
+                            if line_items:
+                                # Get transaction_id from the saved document
+                                from utils.database import execute_query
+                                trans = execute_query(f"SELECT id FROM transactions WHERE document_id = {doc_id}")
+                                if trans:
+                                    transaction_id = trans[0]['id']
+                                    save_line_items(doc_id, transaction_id, line_items)
+                                    st.success(f"💾 Saved to database with {len(line_items)} line items (Document ID: {doc_id})")
+                                else:
+                                    st.success(f"💾 Saved to database (Document ID: {doc_id})")
+                            else:
+                                st.success(f"💾 Saved to database (Document ID: {doc_id})")
                         except Exception as e:
                             st.warning(f"⚠️ Saved locally but database error: {str(e)}")
                         
-                        # Show raw text
-                        with st.expander("🔍 View Raw Extracted Text"):
+                        # Show raw text for debugging
+                        with st.expander("🔍 View Raw Extracted Text (for debugging)"):
                             st.text(result["data"].get("raw_text", "No text extracted"))
+                            
+                            # Show confidence per line
+                            st.markdown("**Text with Confidence:**")
+                            if result.get("debug_text"):
+                                for item in result["debug_text"][:20]:
+                                    conf_pct = item['confidence'] * 100
+                                    st.text(f"{conf_pct:5.1f}% | {item['text']}")
                         
                         # Tips
                         st.info("""

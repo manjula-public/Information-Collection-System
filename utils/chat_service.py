@@ -3,8 +3,40 @@ import streamlit as st
 from openai import OpenAI
 from utils.database import execute_query
 
+def get_configured_llm():
+    """Get LLM client based on settings"""
+    provider = st.session_state.get('llm_provider') or st.secrets.get("llm", {}).get("provider", "OpenAI")
+    model = st.session_state.get('llm_model') or st.secrets.get("llm", {}).get("model", "gpt-4o")
+    
+    try:
+        if provider == "OpenAI":
+            api_key = st.secrets.get("openai", {}).get("api_key") or os.getenv("OPENAI_API_KEY")
+            if api_key:
+                return OpenAI(api_key=api_key), model, "openai"
+        
+        elif provider == "OpenRouter":
+            api_key = st.secrets.get("openrouter", {}).get("api_key") or os.getenv("OPENROUTER_API_KEY")
+            if api_key:
+                return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key), model, "openrouter"
+        
+        elif provider == "Google Gemini":
+            api_key = st.secrets.get("google_gemini", {}).get("api_key") or os.getenv("GOOGLE_GEMINI_API_KEY")
+            if api_key:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                return genai.GenerativeModel(model), model, "gemini"
+        
+        elif provider == "Local (Ollama)":
+            base_url = st.secrets.get("ollama", {}).get("base_url", "http://localhost:11434")
+            return OpenAI(base_url=base_url + "/v1", api_key="ollama"), model, "ollama"
+    
+    except Exception as e:
+        st.warning(f"Error loading {provider}: {str(e)}")
+    
+    return None, None, None
+
 def get_openrouter_client():
-    """Get OpenRouter client from secrets"""
+    """Get OpenRouter client from secrets (legacy support)"""
     api_key = st.secrets.get("openrouter", {}).get("api_key") or os.getenv("OPENROUTER_API_KEY")
     
     if not api_key:
@@ -16,7 +48,7 @@ def get_openrouter_client():
     )
 
 def get_openai_client():
-    """Get OpenAI client from secrets (fallback)"""
+    """Get OpenAI client from secrets (legacy support)"""
     api_key = st.secrets.get("openai", {}).get("api_key") or os.getenv("OPENAI_API_KEY")
     
     if not api_key:
@@ -41,30 +73,33 @@ def process_query(query):
             "provider": "error"
         }
     
-    # Format response with LLM
+    # Format response with configured LLM
     try:
-        # Try OpenRouter first (free)
-        client = get_openrouter_client()
-        if client:
-            answer = chat_with_llm(client, query, results, "meta-llama/llama-3.3-70b-instruct:free")
-            provider = "openrouter"
-        else:
-            # Fallback to OpenAI
-            client = get_openai_client()
-            if client:
-                answer = chat_with_llm(client, query, results, "gpt-4o-mini")
-                provider = "openai"
-            else:
-                # No LLM available, return basic response
-                answer = format_basic_response(query, results)
-                provider = "basic"
+        client, model, provider = get_configured_llm()
         
-        return {
-            "answer": answer,
-            "data": results,
-            "sql": sql,
-            "provider": provider
-        }
+        if client and provider:
+            if provider == "gemini":
+                # Google Gemini uses different API
+                answer = chat_with_gemini(client, query, results)
+            else:
+                # OpenAI-compatible (OpenAI, OpenRouter, Ollama)
+                answer = chat_with_llm(client, query, results, model)
+            
+            return {
+                "answer": answer,
+                "data": results,
+                "sql": sql,
+                "provider": provider
+            }
+        else:
+            # Fallback to basic response
+            answer = format_basic_response(query, results)
+            return {
+                "answer": answer,
+                "data": results,
+                "sql": sql,
+                "provider": "basic"
+            }
     
     except Exception as e:
         # Fallback to basic formatting
@@ -125,27 +160,46 @@ def chat_with_llm(client, query, results, model):
     
     return response.choices[0].message.content
 
+def chat_with_gemini(model, query, results):
+    """Use Google Gemini to format response"""
+    prompt = f"""You are a helpful assistant for expense tracking. Provide concise, clear answers based on the data provided. Format numbers with proper currency symbols and commas.
+
+User asked: {query}
+
+Database results: {results}
+
+Provide a natural language answer."""
+    
+    response = model.generate_content(prompt)
+    return response.text
+
 def format_basic_response(query, results):
     """Format basic response without LLM"""
     if not results:
         return "I couldn't find any data matching your query."
     
-    if len(results) == 1 and 'total' in results[0]:
-        return f"The total amount is ${results[0]['total']:,.2f}"
+    if len(results) == 1 and results[0].get('total') is not None:
+        total = results[0].get('total', 0)
+        return f"The total amount is ${total:,.2f}"
     
-    elif len(results) == 1 and 'count' in results[0]:
-        return f"There are {results[0]['count']} transactions."
+    elif len(results) == 1 and results[0].get('count') is not None:
+        count = results[0].get('count', 0)
+        return f"There are {count} transactions."
     
-    elif 'category' in results[0]:
+    elif results and results[0].get('category'):
         response = "Here's the breakdown by category:\n"
         for row in results[:5]:
-            response += f"- {row['category']}: ${row['total']:,.2f}\n"
+            category = row.get('category', 'Unknown')
+            total = row.get('total', 0)
+            response += f"- {category}: ${total:,.2f}\n"
         return response
     
-    elif 'vendor_name' in results[0]:
+    elif results and results[0].get('vendor_name'):
         response = "Here are the top vendors:\n"
         for row in results[:5]:
-            response += f"- {row['vendor_name']}: ${row['total']:,.2f}\n"
+            vendor = row.get('vendor_name', 'Unknown')
+            total = row.get('total', 0)
+            response += f"- {vendor}: ${total:,.2f}\n"
         return response
     
     else:

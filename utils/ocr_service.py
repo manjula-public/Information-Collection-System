@@ -271,14 +271,14 @@ def extract_line_items(text_with_positions, full_text):
     sorted_text = sorted(text_with_positions, key=lambda x: x['y_pos'])
     
     # Strategy: Look for prices (amounts in the rightmost column) and work backwards to find item names
-    # Collect ALL words on the same line to get full product names
+    # Check BOTH same line AND previous line for descriptions (multi-line items)
     
     for i, item in enumerate(sorted_text):
         text = item['text'].strip()
         
         # Check if this looks like a price/amount (flexible format)
-        # Matches: 118.80, 380.00, 1200.00, etc.
-        price_match = re.match(r'^[\$]?([\d,]+[\.\-]?\d{1,2})$', text)
+        # Matches: 118.80, 380.00, 1200.00, 578.00, etc.
+        price_match = re.match(r'^[\$]?([\d,]+[\.\\-]?\d{1,2})$', text)
         if not price_match:
             continue
         
@@ -303,18 +303,18 @@ def extract_line_items(text_with_positions, full_text):
         if price_count > 2:  # If same price appears more than twice, it's likely a total
             continue
         
-        # Look backwards for ALL words on the same line to build full item description
+        # Look backwards for ALL words on same line AND previous lines
         description_words = []
         quantity = 1.0
         item_number = None
         
-        # Check previous items on same line (within 50 pixels vertically = same line)
-        for j in range(max(0, i-15), i):
+        # EXPANDED SEARCH: Check up to 100 pixels above (to catch multi-line items)
+        for j in range(max(0, i-20), i):
             candidate = sorted_text[j]
             y_diff = abs(candidate['y_pos'] - item['y_pos'])
             
-            # Must be on same line (within 50 pixels)
-            if y_diff > 50:
+            # Check same line (within 50 pixels) OR previous line (50-100 pixels above)
+            if y_diff > 100:
                 continue
             
             candidate_text = candidate['text'].strip()
@@ -328,7 +328,7 @@ def extract_line_items(text_with_positions, full_text):
                 item_number = candidate_text
                 continue
             
-            # Check if this is an item code (skip it)
+            # Check if this is an item code (skip it) - like DY95311
             if re.match(r'^[A-Z]{2}\d+', candidate_text):
                 continue
             
@@ -378,8 +378,8 @@ def extract_line_items(text_with_positions, full_text):
                 line_items.append({
                     'description': final_description,
                     'quantity': quantity,
-                    'unit_price': price / quantity if quantity > 0 else price,
-                    'total': price
+                    'unit_price': round(price / quantity, 2) if quantity > 0 else price,
+                    'total_price': price
                 })
     
     # Remove duplicates - keep the one with lowest price (likely correct)

@@ -1,10 +1,16 @@
 import os
 import re
-import easyocr
 from PIL import Image, ImageEnhance, ImageFilter
 import cv2
 import numpy as np
 import streamlit as st
+
+# Try to import pytesseract
+try:
+    import pytesseract
+    PYTESSERACT_AVAILABLE = True
+except ImportError:
+    PYTESSERACT_AVAILABLE = False
 
 # Try to import Google Cloud Vision
 try:
@@ -14,11 +20,11 @@ try:
 except ImportError:
     GOOGLE_VISION_AVAILABLE = False
 
-# Initialize EasyOCR (cached to avoid reloading)
+# Initialize Tesseract OCR
 @st.cache_resource
 def get_ocr_engine():
-    """Get cached EasyOCR engine"""
-    return easyocr.Reader(['en'], gpu=False)
+    """Get Tesseract OCR - no initialization needed"""
+    return PYTESSERACT_AVAILABLE
 
 # Initialize Google Vision client (cached)
 @st.cache_resource
@@ -163,52 +169,62 @@ def process_document(image_path):
             if ocr_result:
                 engine_used = "google_vision"
         
-        # Fallback to EasyOCR if Google Vision not available or failed
+        # Fallback to Tesseract if Google Vision not available or failed
         if not ocr_result:
             # Preprocess image for better accuracy
             preprocessed_path = preprocess_image(image_path)
             
-            ocr = get_ocr_engine()
-            
-            # Process both original and preprocessed for best results
-            result_original = ocr.readtext(image_path)
-            result_preprocessed = ocr.readtext(preprocessed_path)
-            
-            # Use preprocessed if it has better confidence
-            avg_conf_original = sum(r[2] for r in result_original) / len(result_original) if result_original else 0
-            avg_conf_preprocessed = sum(r[2] for r in result_preprocessed) / len(result_preprocessed) if result_preprocessed else 0
-            
-            result = result_preprocessed if avg_conf_preprocessed > avg_conf_original else result_original
-            
-            if not result:
+            if not PYTESSERACT_AVAILABLE:
                 return {
                     "status": "error",
-                    "message": "No text detected in image"
+                    "message": "No OCR engine available. Please configure Google Cloud Vision in Settings."
                 }
             
-            # Extract all text with positions
-            all_text = []
-            text_with_positions = []
-            total_confidence = 0
-            
-            for detection in result:
-                bbox = detection[0]  # Bounding box coordinates
-                text = detection[1]
-                confidence = detection[2]
+            # Use pytesseract for OCR
+            try:
+                # Read image
+                img = Image.open(preprocessed_path)
                 
-                # Calculate y-position (for line item grouping)
-                y_pos = (bbox[0][1] + bbox[2][1]) / 2
+                # Get OCR data with bounding boxes
+                ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
                 
-                all_text.append(text)
-                text_with_positions.append({
-                    'text': text,
-                    'y_pos': y_pos,
-                    'confidence': confidence
-                })
-                total_confidence += confidence
-            
-            full_text = " ".join(all_text)
-            avg_confidence = total_confidence / len(result) if result else 0
+                # Extract text with positions
+                text_with_positions = []
+                all_text = []
+                total_confidence = 0
+                count = 0
+                
+                for i in range(len(ocr_data['text'])):
+                    text = ocr_data['text'][i].strip()
+                    conf = int(ocr_data['conf'][i])
+                    
+                    if text and conf > 0:  # Only include confident detections
+                        y_pos = ocr_data['top'][i] + ocr_data['height'][i] / 2
+                        
+                        all_text.append(text)
+                        text_with_positions.append({
+                            'text': text,
+                            'y_pos': y_pos,
+                            'confidence': conf / 100.0  # Convert to 0-1 scale
+                        })
+                        total_confidence += conf / 100.0
+                        count += 1
+                
+                if not all_text:
+                    return {
+                        "status": "error",
+                        "message": "No text detected in image"
+                    }
+                
+                full_text = " ".join(all_text)
+                avg_confidence = total_confidence / count if count > 0 else 0
+                engine_used = "tesseract"
+                
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "message": f"OCR processing failed: {str(e)}"
+                }
             
             # Clean up preprocessed image
             try:

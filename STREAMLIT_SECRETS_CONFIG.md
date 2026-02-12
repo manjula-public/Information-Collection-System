@@ -1,30 +1,31 @@
-# 🔐 Streamlit Cloud Secrets Configuration
+# 🔐 Updated Streamlit Cloud Secrets Configuration
 
 ## For: https://information-collection-system-dgh.streamlit.app/
 
 ---
 
-## Step-by-Step Deployment Instructions
+## IMPORTANT: Google Cloud Vision Setup
 
-### 1. Access Streamlit Cloud Dashboard
+To use Google Cloud Vision OCR on Streamlit Cloud, you need to add your Google Cloud service account credentials to the secrets.
+
+### Step 1: Get Google Cloud Credentials
+
+1. Follow the guide in `GOOGLE_VISION_SETUP.md` to create a service account
+2. Download the JSON key file
+3. Open the JSON file and copy its entire contents
+
+### Step 2: Configure Streamlit Cloud Secrets
 
 1. Go to https://share.streamlit.io
-2. Sign in with your GitHub account
-3. Find your app: **information-collection-system-dgh**
-4. Click on the app name
-
-### 2. Configure Secrets
-
-1. Click the **"Settings"** button (⚙️ icon)
-2. Click **"Secrets"** in the left sidebar
-3. Paste the configuration below
-4. Click **"Save"**
+2. Click your app: **information-collection-system-dgh**
+3. Click **"Settings"** (⚙️ icon)
+4. Click **"Secrets"**
+5. Paste the configuration below
+6. Click **"Save"**
 
 ---
 
-## Secrets Configuration
-
-Copy and paste this into the Streamlit Cloud Secrets editor:
+## Complete Secrets Configuration
 
 ```toml
 # ============================================
@@ -41,6 +42,27 @@ provider = "OpenAI"
 model = "gpt-4o"
 
 # ============================================
+# REQUIRED: Google Cloud Vision (for OCR)
+# ============================================
+[gcp_service_account]
+type = "service_account"
+project_id = "your-project-id"
+private_key_id = "your-private-key-id"
+private_key = "-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----\n"
+client_email = "your-service-account@your-project.iam.gserviceaccount.com"
+client_id = "your-client-id"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
+
+# ============================================
+# Settings (Use Google Vision by default)
+# ============================================
+[settings]
+ocr_engine = "google_vision"
+
+# ============================================
 # OPTIONAL: OpenRouter (Free Models)
 # ============================================
 [openrouter]
@@ -51,60 +73,46 @@ api_key = "YOUR_OPENROUTER_API_KEY_HERE"
 # ============================================
 [google_gemini]
 api_key = "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
-
-# ============================================
-# Settings
-# ============================================
-[settings]
-ocr_engine = "easyocr"
 ```
 
 ---
 
-## How to Get API Keys
+## How to Add Google Cloud Credentials
 
-### OpenAI (REQUIRED)
+### Option 1: Copy from JSON file (Recommended)
 
-1. Go to https://platform.openai.com
-2. Sign up or log in
-3. Click on **"API Keys"** in the left sidebar
-4. Click **"Create new secret key"**
-5. Copy the key (starts with `sk-`)
-6. Replace `YOUR_OPENAI_API_KEY_HERE` above
+1. Open your downloaded `google-vision-key.json` file
+2. Copy the ENTIRE contents
+3. In the secrets configuration above, replace the `[gcp_service_account]` section with your actual values
 
-**Cost:** Pay-as-you-go (gpt-4o: ~$2.50 per 1M input tokens)
+**Example JSON structure:**
+```json
+{
+  "type": "service_account",
+  "project_id": "your-project-123456",
+  "private_key_id": "abc123...",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "client_email": "vision-ocr@your-project.iam.gserviceaccount.com",
+  ...
+}
+```
 
-### OpenRouter (OPTIONAL - Free Models Available)
+Convert each JSON field to TOML format in the `[gcp_service_account]` section.
 
-1. Go to https://openrouter.ai
-2. Sign up or log in
-3. Click on **"Keys"** in the top menu
-4. Click **"Create Key"**
-5. Copy the key (starts with `sk-or-`)
-6. Replace `YOUR_OPENROUTER_API_KEY_HERE` above
+### Option 2: Use Streamlit's JSON format
 
-**Free Models:**
-- google/gemini-flash-1.5
-- meta-llama/llama-3.2-3b-instruct:free
-- qwen/qwen-2-7b-instruct:free
-- microsoft/phi-3-mini-128k-instruct:free
+Alternatively, you can paste the entire JSON as a string:
 
-### Google Gemini (OPTIONAL)
-
-1. Go to https://ai.google.dev
-2. Click **"Get API key"**
-3. Sign in with Google account
-4. Click **"Create API key"**
-5. Copy the key (starts with `AIza`)
-6. Replace `YOUR_GOOGLE_GEMINI_API_KEY_HERE` above
-
-**Free Tier:** 60 requests per minute
+```toml
+[gcp_service_account]
+# Paste your entire google-vision-key.json contents here as TOML
+```
 
 ---
 
-## Minimal Configuration (OpenAI Only)
+## Minimal Configuration (If you don't have Google Vision yet)
 
-If you only want to use OpenAI, use this minimal configuration:
+If you haven't set up Google Cloud Vision yet, use this minimal config with pytesseract:
 
 ```toml
 [openai]
@@ -115,143 +123,123 @@ provider = "OpenAI"
 model = "gpt-4o"
 
 [settings]
-ocr_engine = "easyocr"
+ocr_engine = "tesseract"
 ```
+
+**Note:** Tesseract OCR is less accurate than Google Vision but doesn't require additional setup.
+
+---
+
+## Setting Up Google Cloud Vision (Free Tier)
+
+### Quick Setup Steps:
+
+1. **Create Google Cloud Account**
+   - Go to https://console.cloud.google.com
+   - Sign up (free $300 credit for new users)
+
+2. **Create Project**
+   - Click "Select a project" → "New Project"
+   - Name it (e.g., "bill-ocr")
+
+3. **Enable Vision API**
+   - Go to "APIs & Services" → "Library"
+   - Search "Cloud Vision API"
+   - Click "Enable"
+
+4. **Create Service Account**
+   - Go to "IAM & Admin" → "Service Accounts"
+   - Click "Create Service Account"
+   - Name: "vision-ocr"
+   - Role: "Cloud Vision API User"
+
+5. **Download Key**
+   - Click on the service account
+   - Go to "Keys" tab
+   - Click "Add Key" → "Create new key"
+   - Choose JSON
+   - Download the file
+
+6. **Add to Streamlit Secrets**
+   - Copy the JSON contents
+   - Paste into `[gcp_service_account]` section above
+
+**Free Tier:** 1,000 OCR requests per month (plenty for testing!)
 
 ---
 
 ## After Saving Secrets
 
-### 3. Reboot the App
+### Reboot the App
 
-1. Go back to the app dashboard
-2. Click the **"⋮"** menu (three dots)
+1. Go to app dashboard
+2. Click **"⋮"** menu
 3. Click **"Reboot app"**
-4. Wait for the app to restart (~30 seconds)
+4. Wait ~30 seconds
 
-### 4. Test the Deployment
+### Test OCR
 
-1. Visit https://information-collection-system-dgh.streamlit.app/
-2. Go to **Settings** page (⚙️ in sidebar)
-3. Verify your provider is shown
-4. Click **"Test Connection"**
-5. Should show "✅ Connection successful!"
-
-### 5. Test All Features
-
-- **Upload Page:** Upload a test receipt
-- **Documents Page:** View and manage documents
-- **Chat Page:** Ask a question about expenses
-- **Reports Page:** View analytics (after uploading documents)
-- **Settings Page:** Verify LLM configuration
+1. Go to https://information-collection-system-dgh.streamlit.app/
+2. Navigate to **Upload** page
+3. Upload a test receipt
+4. Should see "OCR Engine: google_vision" in the results
+5. Check extracted data quality
 
 ---
 
 ## Troubleshooting
 
-### "Secrets not found" Error
+### "No OCR engine available" error
 
 **Solution:**
-1. Make sure you saved the secrets
-2. Reboot the app
-3. Wait for full restart
+- Make sure `[gcp_service_account]` is configured in secrets
+- Verify Google Cloud Vision API is enabled
+- Check service account has correct permissions
 
-### "Invalid API key" Error
-
-**Solution:**
-1. Verify API key is correct (no extra spaces)
-2. Check key hasn't expired
-3. Verify you have credits in your account
-
-### App Won't Start
+### "Invalid credentials" error
 
 **Solution:**
-1. Check deployment logs in Streamlit Cloud dashboard
-2. Look for errors in the logs
-3. Verify `requirements.txt` is correct
+- Verify JSON format is correct in secrets
+- Check private key has proper line breaks (`\n`)
+- Ensure no extra spaces in the configuration
 
-### Database Resets on Each Deployment
+### OCR still not working
 
-**Expected Behavior:**
-- Streamlit Cloud uses ephemeral storage
-- Database resets on each deployment
-- This is normal for the free tier
-- For persistent storage, use external database
+**Solution:**
+- Fall back to tesseract temporarily:
+  ```toml
+  [settings]
+  ocr_engine = "tesseract"
+  ```
+- Check deployment logs for errors
+- Verify image format (JPG/PNG only)
+
+---
+
+## Cost Monitoring
+
+**Google Cloud Vision Pricing:**
+- First 1,000 requests/month: **FREE**
+- 1,001 - 5,000,000: $1.50 per 1,000 images
+- Set budget alerts in Google Cloud Console
+
+**OpenAI Pricing:**
+- gpt-4o: ~$2.50 per 1M input tokens
+- Monitor at https://platform.openai.com/usage
 
 ---
 
 ## Security Notes
 
-✅ **DO:**
+⚠️ **IMPORTANT:**
+- Never commit service account JSON to Git
 - Keep API keys private
 - Rotate keys regularly
-- Monitor API usage
-- Use separate keys for dev/prod
-
-❌ **DON'T:**
-- Share your secrets configuration
-- Commit secrets to Git
-- Use production keys for testing
-- Share app URL with sensitive data
+- Monitor usage for unexpected spikes
+- Set spending limits in cloud consoles
 
 ---
 
-## Monitoring
+**Your app will have accurate OCR with Google Cloud Vision! 🎯**
 
-### Check App Status
-
-1. Go to https://share.streamlit.io
-2. View app dashboard
-3. Check deployment status
-4. View logs for errors
-
-### Monitor API Usage
-
-**OpenAI:**
-- Dashboard: https://platform.openai.com/usage
-- Set usage limits to avoid surprises
-
-**OpenRouter:**
-- Dashboard: https://openrouter.ai/activity
-- Monitor free tier usage
-
-**Google Gemini:**
-- Console: https://console.cloud.google.com
-- Check quota usage
-
----
-
-## Updating the App
-
-### Auto-Deploy on Git Push
-
-Streamlit Cloud automatically redeploys when you push to GitHub:
-
-```bash
-git add .
-git commit -m "Update feature"
-git push origin main
-```
-
-App will redeploy automatically in ~2-3 minutes.
-
-### Manual Reboot
-
-1. Go to app dashboard
-2. Click "⋮" menu
-3. Click "Reboot app"
-
----
-
-## Support
-
-**Issues?**
-- Check deployment logs in Streamlit Cloud
-- Review `STREAMLIT_CLOUD_DEPLOYMENT.md` for detailed guide
-- Open issue on GitHub: https://github.com/manjula-public/Information-Collection-System/issues
-
----
-
-**Your app is ready to deploy! 🚀**
-
-Just configure the secrets and reboot the app!
+Complete the Google Cloud setup and configure the secrets to get started.

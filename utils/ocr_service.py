@@ -152,17 +152,17 @@ def process_with_google_vision(image_path):
 def process_document(image_path):
     """Process document with OCR and extract invoice data including line items"""
     try:
-        # Check which OCR engine to use
-        use_google_vision = False
+        # Check which OCR engine to use - default to Google Vision
+        use_google_vision = True  # Default to Google Vision
         if "settings" in st.secrets:
-            ocr_engine = st.secrets["settings"].get("ocr_engine", "easyocr")
+            ocr_engine = st.secrets["settings"].get("ocr_engine", "google_vision")
             use_google_vision = ocr_engine == "google_vision"
         elif "google_vision" in st.secrets:
-            use_google_vision = st.secrets["google_vision"].get("enabled", False)
+            use_google_vision = st.secrets["google_vision"].get("enabled", True)
         
         # Try Google Vision first if enabled
         ocr_result = None
-        engine_used = "easyocr"
+        engine_used = "tesseract"
         
         if use_google_vision and GOOGLE_VISION_AVAILABLE:
             ocr_result = process_with_google_vision(image_path)
